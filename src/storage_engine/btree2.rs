@@ -1,5 +1,5 @@
-use super::page::{PAGE_SIZE, PageHeader};
-use core::panic;
+
+use std::fmt::Debug;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -10,114 +10,124 @@ use std::rc::Rc;
 // figure out that issue we solved by inserting 0
 // root node maybe shouldnt be an option
 
-const MAX_KEYS: usize = const {
-    let key_and_child = size_of::<(u32, NodeRef)>();
-    (PAGE_SIZE - size_of::<PageHeader>())  / key_and_child
-};
+pub trait Key = Ord + Debug + Copy;
+pub trait Val = Debug + Copy;
+
+const MAX_KEYS: usize = 1000; // todo make specific to key-value pair
 // const MAX_KEYS: usize = 5;
 
 #[derive(Debug)]
-enum NodeRef {
-    Internal(Box<InternalNode>),
-    Leaf(Rc<RefCell<LeafNode>>)
+enum NodeRef<K: Key,V : Val> {
+    Internal(Box<InternalNode<K,V>>),
+    Leaf(Rc<RefCell<LeafNode<K,V>>>)
 }
 
 #[derive(Debug)]
-struct InternalNode {
-    data: Vec<(u32, NodeRef)>,
+struct InternalNode<K: Key, V: Val> {
+    keys: Vec<K>,
+    children: Vec<NodeRef<K,V>>
 }
+
 
 #[derive(Debug)]
-struct LeafNode {
-    data: Vec<(u32, char)>,
-    next_leaf: Option<Rc<RefCell<LeafNode>>>,
+struct LeafNode<K: Key,V : Val> {
+    key_val_pairs: Vec<(K, V)>,
+    next_leaf: Option<Rc<RefCell<LeafNode<K,V>>>>,
 }
 
-impl InternalNode {
-    pub fn new() -> Self {
+impl<K: Key,V : Val> InternalNode<K,V> {
+    pub fn new(child: NodeRef<K,V>) -> Self {
         Self {
-            data: Vec::new()
+            keys: Vec::new(),
+            children: vec![child]
         }
     }
 
-    pub fn insert(&mut self, key: u32, val: char) -> Result<(), (NodeRef, u32)> {
-        let index = self.data.binary_search_by(|probe| {
-            probe.0.cmp(&key)
-        }).expect_err("Key already exists") - 1;
+    pub fn insert(&mut self, key: K, val: V) -> Result<(), (NodeRef<K,V>, K)> {
+        let index = self.keys.binary_search_by(|probe| {
+            probe.cmp(&key)
+        }).expect_err("Key already exists");
 
-        let res = match &mut self.data[index].1 {
+        let child_insert_result = match &mut self.children[index] {
             NodeRef::Internal(the_box) => the_box.insert(key, val),
             NodeRef::Leaf(rc) => rc.borrow_mut().insert(key, val)
         };
 
-        if let Err((new_node_ref, child_median_key)) = res {
-            if self.data.len() < MAX_KEYS {
-                self.data.insert(index + 1, (child_median_key, new_node_ref));
+        if let Err((new_child_node, child_median_key)) = child_insert_result {
+            if self.keys.len() < MAX_KEYS {
+                self.keys.insert(index, child_median_key);
+                self.children.insert(index + 1, new_child_node);
                 
                 Ok(()) 
             } else {
-                let right_split = self.data.split_off(MAX_KEYS / 2);
-                let median_key = right_split[0].0;
-                let new_internal = InternalNode {
-                    data: right_split,
-                };
-
-                let mut leaf_ref = Box::new(new_internal);
+                let right_split = self.keys.split_off(MAX_KEYS / 2);
+                let right_split_children = self.children.split_off(MAX_KEYS / 2 + 1);
+                
+                let mut right_node = Box::new(InternalNode {
+                    keys: right_split,
+                    children: right_split_children
+                });
+                
+                let median_key = self.keys.pop().unwrap();
+                debug_assert_eq!(self.keys.len() + 1, self.children.len());
+                
                 match child_median_key.cmp(&median_key) {
                     Ordering::Greater => {
-                        let idx = leaf_ref.data.binary_search_by(|probe| probe.0.cmp(&child_median_key)).unwrap_err();
-                        leaf_ref.data.insert(idx, (child_median_key, new_node_ref));
+                        let idx = right_node.keys.binary_search_by(|probe| probe.cmp(&child_median_key)).unwrap_err();
+                        right_node.keys.insert(idx, child_median_key);
+                        right_node.children.insert(idx + 1, new_child_node);
                     },
                     Ordering::Less => {
-                        let idx = self.data.binary_search_by(|probe| probe.0.cmp(&child_median_key)).unwrap_err();
-                        self.data.insert(idx, (child_median_key, new_node_ref));
+                        let idx = self.keys.binary_search_by(|probe| probe.cmp(&child_median_key)).unwrap_err();
+                        self.keys.insert(idx, child_median_key);
+                        self.children.insert(idx + 1, new_child_node);
                     }
                     Ordering::Equal => panic!("Shouldve already checked for existing key.")
                 }
 
-                Err((NodeRef::Internal(leaf_ref), median_key))
+                Err((NodeRef::Internal(right_node), median_key))
             }
         } else {
             Ok(())    
         }
     }
 
-    pub fn search(&self, key: u32) -> Option<char> {
-        let index = match self.data.binary_search_by(|probe| {
-            probe.0.cmp(&key)
+    pub fn search(&self, key: K) -> Option<V> {
+        let index = match self.keys.binary_search_by(|probe| {
+            probe.cmp(&key)
         }) {
             Ok(idx) => idx,
             Err(idx) => if idx == 0 { return None } else {idx - 1}
         };
 
-        match &self.data[index].1 {
+        match &self.children[index + 1] {
             NodeRef::Internal(node_ref) => node_ref.search(key),
             NodeRef::Leaf(leaf_ref) => leaf_ref.borrow().search(key)
         }
     }
 }
 
-impl LeafNode {
+impl<K: Key, V: Val> LeafNode<K,V> {
     pub fn new() -> Self {
         Self {
-            data: Vec::new(),
+            key_val_pairs: Vec::new(),
             next_leaf: None
         }
     }
 
-    pub fn insert(&mut self, key: u32, val: char) -> Result<(), (NodeRef, u32)> {
-        if self.data.len() < MAX_KEYS {
-            let index = self.data.binary_search_by(|probe| {
+    pub fn insert(&mut self, key: K, val: V) -> Result<(), (NodeRef<K,V>, K)> {
+        if self.key_val_pairs.len() < MAX_KEYS {
+            let index = self.key_val_pairs.binary_search_by(|probe| {
                 probe.0.cmp(&key)
             }).expect_err("Key already exists");
-            self.data.insert(index, (key, val));
+            self.key_val_pairs.insert(index, (key, val));
 
             Ok(())    
         } else {
-            let right_split = self.data.split_off((MAX_KEYS + 1) / 2);
+            let right_split = self.key_val_pairs.split_off((MAX_KEYS + 1) / 2);
             let median_key = right_split[0].0;
             let new_leaf = LeafNode {
-                data: right_split,
+                key_val_pairs: right_split,
                 next_leaf: self.next_leaf.take()
             };
 
@@ -139,53 +149,47 @@ impl LeafNode {
     }
     
 
-    pub fn search(&self, key: u32) -> Option<char> {
-        self.data.binary_search_by(|probe| {
+    pub fn search(&self, key: K) -> Option<V> {
+        self.key_val_pairs.binary_search_by(|probe| {
             probe.0.cmp(&key)
-        }).ok().map(|idx| self.data[idx].1)
+        }).ok().map(|idx| self.key_val_pairs[idx].1)
     }
 }
 
 
 
 #[derive(Debug)]
-pub struct BTree {
-    root: NodeRef
+pub struct BTree<K: Key, V: Val> {
+    root: Option<NodeRef<K,V>>
 }
 
-impl BTree {
+impl<K: Key,V: Val> BTree<K,V> {
     pub fn new() -> Self {
-        let mut btree = Self {
-            root: NodeRef::Leaf(Rc::new(RefCell::new(LeafNode::new())))
-        };
-        btree.insert(0, 'a');
-        btree
+        Self {
+            root: Some(NodeRef::Leaf(Rc::new(RefCell::new(LeafNode::new()))))
+        }
     }
 
-    pub fn insert(&mut self, key: u32, val: char) {
-        let res = match &mut self.root {
+    pub fn insert(&mut self, key: K, val: V) {
+        let res = match self.root.as_mut().expect("why is the root gone?") {
             NodeRef::Internal(the_box) => the_box.insert(key, val),
             NodeRef::Leaf(rc) => rc.borrow_mut().insert(key, val)
         };
 
         if let Err((root_split, key)) = res {
-            let og_key = match &mut self.root {
-                NodeRef::Internal(the_box) => the_box.data[0].0,
-                NodeRef::Leaf(rc) => rc.borrow().data[0].0
+            let new_root = InternalNode {
+                keys: vec![key],
+                children: vec![self.root.take().unwrap(), root_split]
             };
 
-            let mut temp = NodeRef::Internal(Box::new(InternalNode::new()));
-            std::mem::swap(&mut self.root, &mut temp);
-            if let NodeRef::Internal(the_box) = &mut self.root {
-                the_box.data = vec![(og_key, temp),(key, root_split)];
-            }
+            self.root = Some(NodeRef::Internal(Box::new(new_root)));
         }
     }
 
 
     
-    pub fn search(&self, key: u32) -> Option<char> {
-        match &self.root {
+    pub fn search(&self, key: K) -> Option<V> {
+        match self.root.as_ref().unwrap() {
             NodeRef::Internal(node) => node.search(key),
             NodeRef::Leaf(node) => node.borrow().search(key)
         }
@@ -193,21 +197,27 @@ impl BTree {
 
     pub fn height(&self) -> usize {
         let mut height = 0;
-        let mut cur = &self.root;
-        while let NodeRef::Internal(the_box) = cur {
+        let mut cur = self.root.as_ref();
+        loop {
+            cur = match cur {
+                Some(NodeRef::Internal(the_box)) => {
+                    Some(&the_box.children[0])
+                },
+                Some(NodeRef::Leaf(_)) => {
+                    None
+                },
+                None => break
+            };
             height += 1;
-            let first_child = &the_box.data[0];
-            cur = &first_child.1;
         }
         height
     }
 
-    pub fn iter(&self) -> BTreeIter {
+    pub fn iter(&self) -> BTreeIter<K,V> {
         //Find leftmost leaf
-        let mut cur = &self.root;
+        let mut cur = self.root.as_ref().unwrap();
         while let NodeRef::Internal(the_box) = cur {
-            let first_child = &the_box.data[0];
-            cur = &first_child.1;
+            cur = &the_box.children[0];
         }
 
         if let NodeRef::Leaf(rc) = cur {
@@ -221,11 +231,11 @@ impl BTree {
     }
 }
 
-impl Display for BTree {
+impl<K: Key,V: Val> Display for BTree<K,V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_char('\n')?;
         let mut queue = VecDeque::new();
-        queue.push_back(&self.root);
+        queue.push_back(self.root.as_ref().unwrap());
         while !queue.is_empty() {
             let width = queue.len();
 
@@ -234,16 +244,16 @@ impl Display for BTree {
                 match next {
                     NodeRef::Internal(internal) => {
                         f.write_char('(')?;
-                        for key in internal.data.iter().map(|tuple| tuple.0) {
-                            f.write_fmt(format_args!("{},", key))?;
+                        for key in internal.keys.iter() {
+                            f.write_fmt(format_args!("{:?},", key))?;
                         }
                         f.write_char(')')?;
-                        queue.extend(internal.data.iter().map(|tuple| &tuple.1));
+                        queue.extend(internal.children.iter());
                     },
                     NodeRef::Leaf(leaf) => {
                         f.write_char('(')?;
-                        for key in leaf.borrow().data.iter().map(|tuple| tuple.0) {
-                            f.write_fmt(format_args!("{},", key))?;
+                        for key in leaf.borrow().key_val_pairs.iter().map(|tuple| tuple.0) {
+                            f.write_fmt(format_args!("{:?},", key))?;
                         }
                         f.write_char(')')?;
                     }
@@ -257,23 +267,23 @@ impl Display for BTree {
 }
 
 
-pub struct BTreeIter {
-    current_leaf: Option<Rc<RefCell<LeafNode>>>,
+pub struct BTreeIter<K: Key,V: Val> {
+    current_leaf: Option<Rc<RefCell<LeafNode<K,V>>>>,
     current_index: usize
 }
 
-impl Iterator for BTreeIter {
-    type Item = char;
+impl<K: Key, V: Val> Iterator for BTreeIter<K,V> {
+    type Item = V;
     fn next(&mut self) -> Option<Self::Item> {
         let (ret_val, next_leaf) = {
             if let Some(x) = self.current_leaf.as_deref() {
                 let leaf_node = x.borrow();
-                let next_leaf = if (self.current_index + 1) == leaf_node.data.len() {
+                let next_leaf = if (self.current_index + 1) == leaf_node.key_val_pairs.len() {
                     Some(leaf_node.next_leaf.clone())
                 } else {
                     None
                 };
-                (leaf_node.data[self.current_index].1, next_leaf)
+                (leaf_node.key_val_pairs[self.current_index].1, next_leaf)
             } else {
                 return None;
             }
@@ -297,7 +307,7 @@ mod tests {
 
     // #[test]
     pub fn test_insert_and_search() {
-        let mut btree = BTree::new();
+        let mut btree = BTree::<u32, char>::new();
 
         btree.insert(1, 'a');
         btree.insert(2, 'b');
@@ -324,7 +334,7 @@ mod tests {
         let mut btree = BTree::new();
         println!("MAX_KEYS: {}", MAX_KEYS);
 
-        let mut nums: Vec<(u32, u32)> = (1..1_000_000).map(|n| (random::<u32>(),n)).collect();
+        let mut nums: Vec<(u32, u32)> = (1..200_000).map(|n| (random::<u32>(),n)).collect();
         nums.sort();
 
         println!("Starting!\n\n");
@@ -354,7 +364,7 @@ mod tests {
         }
         println!("Done inserting.");
 
-        let btree_iter = btree.iter().skip(1);
+        let btree_iter = btree.iter();
         let output: String = btree_iter.collect();
 
         assert_eq!(&output, test_string);

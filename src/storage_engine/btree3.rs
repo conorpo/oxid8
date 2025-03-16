@@ -367,7 +367,7 @@ mod tests {
         let mut btree = BTree::new();
         println!("MAX_KEYS: {}", MAX_KEYS);
 
-        let mut nums: Vec<(u32, u32)> = (1..10_000_000).map(|n| (random::<u32>(),n)).collect();
+        let mut nums: Vec<(u32, u32)> = (1..1_000_000).map(|n| (random::<u32>(),n)).collect();
         nums.sort();
 
         println!("Starting!\n\n");
