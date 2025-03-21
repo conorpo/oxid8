@@ -6,7 +6,7 @@
 //mod file;
 // mod btree;
 //mod page;
-mod storage_engine;
+pub mod storage_engine;
 // pub mod directory;
 
 #[cfg(test)]

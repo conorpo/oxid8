@@ -21,6 +21,7 @@ enum NodeRef<K: Key,V : Val> {
     Internal(Box<InternalNode<K,V>>),
     Leaf(Rc<RefCell<LeafNode<K,V>>>)
 }
+use NodeRef as NR;
 
 #[derive(Debug)]
 struct InternalNode<K: Key, V: Val> {
@@ -34,8 +35,9 @@ struct LeafNode<K: Key,V : Val> {
     key_val_pairs: Vec<(K, V)>,
     next_leaf: Option<Rc<RefCell<LeafNode<K,V>>>>,
 }
-
 impl<K: Key,V : Val> InternalNode<K,V> {
+   
+
     pub fn new(child: NodeRef<K,V>) -> Self {
         Self {
             keys: Vec::new(),
@@ -49,8 +51,8 @@ impl<K: Key,V : Val> InternalNode<K,V> {
         }).expect_err("Key already exists");
 
         let child_insert_result = match &mut self.children[index] {
-            NodeRef::Internal(the_box) => the_box.insert(key, val),
-            NodeRef::Leaf(rc) => rc.borrow_mut().insert(key, val)
+            NR::Internal(the_box) => the_box.insert(key, val),
+            NR::Leaf(rc) => rc.borrow_mut().insert(key, val)
         };
 
         if let Err((new_child_node, child_median_key)) = child_insert_result {
@@ -93,6 +95,7 @@ impl<K: Key,V : Val> InternalNode<K,V> {
     }
 
     pub fn search(&self, key: K) -> Option<V> {
+
         let index = match self.keys.binary_search_by(|probe| {
             probe.cmp(&key)
         }) {
@@ -101,8 +104,8 @@ impl<K: Key,V : Val> InternalNode<K,V> {
         };
 
         match &self.children[index + 1] {
-            NodeRef::Internal(node_ref) => node_ref.search(key),
-            NodeRef::Leaf(leaf_ref) => leaf_ref.borrow().search(key)
+            NR::Internal(node_ref) => node_ref.search(key),
+            NR::Leaf(leaf_ref) => leaf_ref.borrow().search(key)
         }
     }
 }
@@ -172,8 +175,8 @@ impl<K: Key,V: Val> BTree<K,V> {
 
     pub fn insert(&mut self, key: K, val: V) {
         let res = match self.root.as_mut().expect("why is the root gone?") {
-            NodeRef::Internal(the_box) => the_box.insert(key, val),
-            NodeRef::Leaf(rc) => rc.borrow_mut().insert(key, val)
+            NR::Internal(the_box) => the_box.insert(key, val),
+            NR::Leaf(rc) => rc.borrow_mut().insert(key, val)
         };
 
         if let Err((root_split, key)) = res {
@@ -182,7 +185,7 @@ impl<K: Key,V: Val> BTree<K,V> {
                 children: vec![self.root.take().unwrap(), root_split]
             };
 
-            self.root = Some(NodeRef::Internal(Box::new(new_root)));
+            self.root = Some(NR::Internal(Box::new(new_root)));
         }
     }
 
