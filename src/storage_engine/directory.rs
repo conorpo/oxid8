@@ -2,16 +2,16 @@ use winapi;
 
 use std::fs::File;
 use std::io::{self, Read};
-use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::prelude::*;
 use std::thread::panicking;
 use std::{collections::HashMap, path::PathBuf};
 use super::cache::*;
-use super::{PAGE_SIZE};
+use super::{PAGE_SIZE, DATA_PATH};
 
 // General File Structure?
 const HEADER_SIZE: usize = 64;
-pub type FullPageIndex = (u16, u16);
+pub type FileIndex = u16;
+pub type PageIndex = u16;
+pub type OffsetInPage = usize;
 
 
 //Make monomorphic over pagesize?
@@ -39,7 +39,6 @@ impl Pager {
     fn read_page(&self, page_index: u16) -> Box<[u8]> {
         let mut buffer = Box::new([0 as u8; PAGE_SIZE]);
         self.file.seek_read(buffer.as_mut(), page_index as u64 * PAGE_SIZE as u64).expect("Failed to read for some reason.");
-        
         buffer
     }
     
@@ -62,22 +61,24 @@ impl Directory {
         }
     }
 
-    pub fn register_file(&mut self, file_path: PathBuf) -> Result<(),io::Error> {
+    pub fn register_file(&mut self, file_name: String) -> Result<usize,io::Error> {
+        let file_path = PathBuf::from(format!("{DATA_PATH}{file_name}"));
         self.pagers.push(Pager::new(file_path)?);
 
-        Ok(())
+        Ok(self.pagers.len() - 1)
     }
 
-    pub fn read_page(&self, full_page_index: FullPageIndex) -> Option<Box<[u8]>> {
+    pub fn read_page(&self, full_page_index: (FileIndex, PageIndex)) -> Option<Box<[u8]>> {
         self.page_cache.read_page(full_page_index).or_else(|| {
             let (file_index, page_index) = full_page_index;
             self.pagers.get(file_index as usize).map(|pager| {
+                //todo: Put in cache
                 pager.read_page(page_index)
             })
         })    
     }
 
-    pub fn update_page(&mut self, full_page_index: FullPageIndex, data: Box<[u8]>) -> Result<(), &'static str> {
+    pub fn update_page(&mut self, full_page_index: (FileIndex, PageIndex), data: Box<[u8]>) -> Result<(), &'static str> {
         if let Some(cached_page) = self.page_cache.get_mut(full_page_index) {
             *cached_page = data;
 
