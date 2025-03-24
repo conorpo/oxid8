@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use bincode;
+use serde::{Deserialize, Serialize};
 
 use super::directory::*;
 use std::{fmt::Debug, marker::PhantomData};
@@ -12,14 +12,14 @@ pub trait Val = Debug + Copy;
 #[derive(Deserialize, Serialize, Copy, Clone)]
 enum NodeType {
     Internal,
-    Leaf
+    Leaf,
 }
 
 impl NodeType {
     pub fn is_leaf(self) -> bool {
         match self {
             NodeType::Internal => false,
-            NodeType::Leaf => true
+            NodeType::Leaf => true,
         }
     }
 }
@@ -28,9 +28,9 @@ const NODE_TYPE_SIZE: usize = std::mem::size_of::<NodeType>();
 
 pub struct BTreeIndex<'a, K: Key> {
     directory: &'a Directory,
-    file_index: FileIndex, // u16
+    file_index: FileIndex,        // u16
     target_file_index: FileIndex, //u16
-    _boo: PhantomData<K>
+    _boo: PhantomData<K>,
 }
 
 impl<'a, K: Key> BTreeIndex<'a, K> {
@@ -39,7 +39,7 @@ impl<'a, K: Key> BTreeIndex<'a, K> {
             _boo: PhantomData,
             file_index,
             target_file_index,
-            directory
+            directory,
         }
     }
 
@@ -47,20 +47,31 @@ impl<'a, K: Key> BTreeIndex<'a, K> {
         todo!()
     }
 
-
     fn search_leaf(&self, key: K, data: &[u8]) -> Option<(PageIndex, OffsetInPage)> {
         todo!()
     }
 
     pub fn search(&self, key: K) -> Option<(PageIndex, OffsetInPage)> {
-        let mut page = self.directory.read_page((self.file_index, 0)).expect("Root missing.");
+        let mut page = self
+            .directory
+            .read_page((self.file_index, 0))
+            .expect("Root missing.");
 
-        while let NodeType::Internal = bincode::deserialize::<NodeType>(&page[..NODE_TYPE_SIZE]).expect("Failed to deserialize node type.") {
+        while let NodeType::Internal = bincode::deserialize::<NodeType>(&page[..NODE_TYPE_SIZE])
+            .expect("Failed to deserialize node type.")
+        {
             let next_page = self.search_internal(key, &page[NODE_TYPE_SIZE..]);
-            page = self.directory.read_page((self.file_index, next_page)).expect("Page missing.");
+            page = self
+                .directory
+                .read_page((self.file_index, next_page))
+                .expect("Page missing.");
         }
 
-        debug_assert!(bincode::deserialize::<NodeType>(&page[..NODE_TYPE_SIZE]).unwrap().is_leaf());
+        debug_assert!(
+            bincode::deserialize::<NodeType>(&page[..NODE_TYPE_SIZE])
+                .unwrap()
+                .is_leaf()
+        );
         self.search_leaf(key, &page[..NODE_TYPE_SIZE])
     }
 
@@ -68,4 +79,3 @@ impl<'a, K: Key> BTreeIndex<'a, K> {
         todo!()
     }
 }
-
