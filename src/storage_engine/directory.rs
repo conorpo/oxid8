@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::thread::panicking;
 use std::{collections::HashMap, path::PathBuf};
+use std::os::windows::fs::FileExt;
 use super::cache::*;
 use super::{PAGE_SIZE, DATA_PATH};
 
@@ -50,14 +51,14 @@ impl Pager {
 
 pub struct Directory {
     pagers: Vec<Pager>,
-    page_cache: PageCache
+    page_cache: TwoQcache<(FileIndex, PageIndex), Box<[u8]>> 
 }
 
 impl Directory {
     pub fn new() -> Self {
         Self {
             pagers: Vec::new(),
-            page_cache: PageCache::new()
+            page_cache: TwoQcache::new(100) //todo: change
         }
     }
 
@@ -68,26 +69,32 @@ impl Directory {
         Ok(self.pagers.len() - 1)
     }
 
-    pub fn read_page(&self, full_page_index: (FileIndex, PageIndex)) -> Option<Box<[u8]>> {
-        self.page_cache.read_page(full_page_index).or_else(|| {
-            let (file_index, page_index) = full_page_index;
-            self.pagers.get(file_index as usize).map(|pager| {
-                //todo: Put in cache
-                pager.read_page(page_index)
-            })
-        })    
-    }
+    // pub fn read_page(&mut self, full_page_index: (FileIndex, PageIndex)) -> Option<&[u8]> {
+    //     match self.page_cache.access(&full_page_index) {
+    //         Ok(page) => Some(page),
+    //         Err(raw_entry) => {
+    //             let (file_index, page_index) = full_page_index;
+    //             if let Some(page) = self.pagers.get(file_index as usize).map(|pager| {
+    //                 pager.read_page(page_index)
+    //             }) {
+    //                 Some(&**raw_entry.or_insert(full_page_index, page).1)
+    //             } else {
+    //                 None
+    //             }
+    //         }
+    //     }
+    // }
 
-    pub fn update_page(&mut self, full_page_index: (FileIndex, PageIndex), data: Box<[u8]>) -> Result<(), &'static str> {
-        if let Some(cached_page) = self.page_cache.get_mut(full_page_index) {
-            *cached_page = data;
+    // pub fn update_page(&mut self, full_page_index: (FileIndex, PageIndex), data: Box<[u8]>) -> Result<(), &'static str> {
+    //     if let Some(cached_page) = self.page_cache.get_mut(full_page_index) {
+    //         *cached_page = data;
 
-            Ok(())
-        } else {
-            self.pagers.get_mut(full_page_index.0 as usize).map(|pager| {
-                pager.update_page(full_page_index.1, data);
-                ()
-            }).ok_or("Could not find specified page.")
-        }
-    }
+    //         Ok(())
+    //     } else {
+    //         self.pagers.get_mut(full_page_index.0 as usize).map(|pager| {
+    //             pager.update_page(full_page_index.1, data);
+    //             ()
+    //         }).ok_or("Could not find specified page.")
+    //     }
+    // }
 }
