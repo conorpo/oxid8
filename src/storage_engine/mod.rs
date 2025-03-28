@@ -10,3 +10,4 @@ pub mod cache;
 pub mod directory;
 pub mod storage;
 pub mod table;
+pub mod page;

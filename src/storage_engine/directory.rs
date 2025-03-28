@@ -5,8 +5,10 @@ use std::io::{self, Read};
 use std::thread::panicking;
 use std::{collections::HashMap, path::PathBuf};
 use std::os::windows::fs::FileExt;
+
 use super::cache::*;
 use super::{PAGE_SIZE, DATA_PATH};
+use super::page::*;
 
 // General File Structure?
 const HEADER_SIZE: usize = 64;
@@ -49,9 +51,10 @@ impl Pager {
     }
 }
 
+// Another problem, having parametric polymorphism
 pub struct Directory {
     pagers: Vec<Pager>,
-    page_cache: TwoQcache<(FileIndex, PageIndex), Box<[u8]>> 
+    page_cache: TwoQcache<(FileIndex, PageIndex), SlottedPage<true>>, 
 }
 
 impl Directory {
